@@ -1,0 +1,299 @@
+---
+title: "[Prediction Assignment] Weight Lifting Exercise"
+author: "Zhi Xiong Chong"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+## Introduction 
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(fig.width=12, fig.height=8, fig.path='Figs/',
+                      echo=TRUE, warning=FALSE, 
+                      message=FALSE, eval=TRUE, cache=TRUE)
+```
+
+
+Large amount of data about personal activity is collected using devices in a relatively in expensive manner. Following the study of Human Activity Recognition (HAR) by Groupware@LES (<http://groupware.les.inf.puc-rio.br/har>), we obtain both the training and test data. 
+
+According to the study, 6 young health participants were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions: exactly according to the specification (Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E).
+
+Our goal here is to predict the manner in which these 6 individuals did the exercise, dictated by the "classe" variable in the training set. 
+
+This report descibes: 
+
+1. Variables used for prediction. 
+2. Method taken to build the prediction model
+3. Usage of cross validation
+4. Expected out-of-sample error 
+5. Reasons for the choices made. 
+
+At the end of this work, the prediction model will be used to predict 20 different test cases. 
+
+Here is the process of Prediction:
+
+1. Question --> "Can we predict the class?"
+2. Input Data --> "getting input data"
+3. Features --> "looking at variables, processing the data, dumping out some of the variables"
+4. Algorithm --> "Exploration, building models, fitting"
+5. Parameters --> "Looking at the parameter (threshold values --> use accuracy and correlation)"
+6. Evaluation --> "prediction"
+
+The above process is followed in this work. Before we begin, we loaded up the following packages and set seed to be `123`. 
+```{r echo=FALSE, error=FALSE, message=FALSE}
+library(ggplot2)
+library(caret)
+library(randomForest)
+library(rattle)
+library(rpart.plot)
+set.seed(123)
+```
+
+## Question
+Question: "Can we predict the class of an activity taken?"
+Goal: "to predict 20 different test cases."
+
+## Input Data Loading and Processing
+Working directory is set. Testing and training data are loaded from the url and csv format. Testing and training data are briefly looked through to find out about the features available. The outcome to be investigated is labelled as `class` in the training data and `problem_id` in the testing data. 
+
+```{r}
+wd <- "C:/Users/User/Dropbox/Personal/Coursera/DataScience/8_PredictionMachineLearning/predmachlearn_CourseProject/"
+testFile <- paste(wd, "pml-testing.csv", sep="")
+trainFile <- paste(wd, "pml-training.csv", sep="")
+setwd(wd)
+
+testData <- read.table(testFile, na.strings=c("NA",""),
+                      header=TRUE, sep=",")
+
+trainData <- read.table(trainFile, na.strings=c("NA",""),
+                       header=TRUE, sep=",")
+
+str(trainData)
+```
+
+## Data Features
+
+It was realised that there are alot of `NA` and empty values in the datasets. We removed all the columns with `NA` and empty values, and are left with ___ columns. Furthermore, we also removed the first 8 columns that are irrelevant in building the prediction models such as ___. 
+
+```{r}
+# Build functions that returns amount of NA/empty values in each column
+nonNAs <- function(x) {
+  as.vector(apply(x, 2, function(x) length(which(!is.na(x)))))
+}
+
+# Build vector of columns (with NA/empty values) to drop.
+colcounter <- nonNAs(trainData)
+drops <- c()
+for (count in 1:length(colcounter)) {
+  if (colcounter[count] < nrow(trainData)) {
+    drops <- c(drops, colnames(trainData)[count])
+  }
+}
+
+# Drop columns with NA/empty values, then first 8 columns 
+trainData <- trainData[,!(names(trainData) %in% drops)]
+trainData <- trainData[,8:length(colnames(trainData))]
+testData <- testData[,!(names(testData) %in% drops)]
+testData <- testData[,8:length(colnames(testData))]
+```
+
+In order to ensure all the variables are useful when constructing a prediction model, we look for and remove variables with no variability at all. This can be done through the nearZeroVar function, as shown below. If any `nzv` value is `TRUE`, that particular variable will be removed. As suggested by the results below, no variable shall be removed from the current dataset. 
+
+```{r}
+nearZeroVar(trainData, saveMetrics=T)
+nearZeroVar(testData, saveMetrics=T)
+```
+
+## Algorithm, Parameters and Evaluation: Building and Testing the Prediction Models 
+
+In this study, we will be using 2 different methods in buidling the prediction model, namely the Classification and Regression Trees (CART) and Random Forest (RF). 
+
+### Slicing of data
+The training data is sliced into 2 parts: 75% of training data and 25% of testing data within the training data itself. Both the datasets are then sliced further into 5 folds using k-fold partition method.
+
+```{r}
+inTrain <- createDataPartition(y=trainData$classe, p=0.75, list=F)
+trainData_train <- trainData[inTrain,]
+trainData_test <- trainData[-inTrain,]
+
+folds <- createFolds(y=trainData_train$classe, k=5, list=T, returnTrain=F)
+trainData_train1 <- trainData_train[folds[[1]],]
+trainData_train2 <- trainData_train[folds[[2]],]
+trainData_train3 <- trainData_train[folds[[3]],]
+trainData_train4 <- trainData_train[folds[[4]],]
+trainData_train5 <- trainData_train[folds[[5]],]
+
+folds <- createFolds(y=trainData_test$classe, k=5, list=T, returnTrain=F)
+trainData_test1 <- trainData_test[folds[[1]],]
+trainData_test2 <- trainData_test[folds[[2]],]
+trainData_test3 <- trainData_test[folds[[3]],]
+trainData_test4 <- trainData_test[folds[[4]],]
+trainData_test5 <- trainData_test[folds[[5]],]
+```
+
+### Training the data to CART model
+We constructed the Classification and Regression Trees (CART) model with `rpart` method on 1 of 5 sets of the training data. A summary of the model fitted was summarised and a classification tree plot is shown below.
+
+```{r}
+cartFit1 <- train(classe~., method="rpart", data=trainData_train1)
+print(cartFit1, digit=3)
+rattle::fancyRpartPlot(cartFit1$finalModel)
+```
+
+### Evaluation of CART model via the Accuracy criterion
+We looked closely into the predictivity of the CART model on test values by doing the following: 
+
+```{r}
+predictions <- predict(cartFit1, trainData_test1)
+confusionMatrix(predictions, trainData_test1$classe)
+```
+
+It is realised that the Accuracy value is below 80% -- not favorable in predictivity of a model. When we further tested this on other training datasets, with their respective test values, we tabled each Accuracy as following. All the Accuracies found are roughly within the range of 45-50%. 
+
+```{r}
+tableAccuracy <- data.frame(Accuracy=numeric())
+tableAccuracy <- rbind(tableAccuracy, confusionMatrix(predictions, trainData_test1$classe)$overall[1])
+
+cartFit <- train(classe~., method="rpart", data=trainData_train2)
+testVal = trainData_test2
+predictions <- predict(cartFit, testVal)
+tableAccuracy <- rbind(tableAccuracy, confusionMatrix(predictions, testVal$classe)$overall[1])
+
+cartFit <- train(classe~., method="rpart", data=trainData_train3)
+testVal = trainData_test3
+predictions <- predict(cartFit, testVal)
+tableAccuracy <- rbind(tableAccuracy, confusionMatrix(predictions, testVal$classe)$overall[1])
+
+cartFit <- train(classe~., method="rpart", data=trainData_train4)
+testVal = trainData_test4
+predictions <- predict(cartFit, testVal)
+tableAccuracy <- rbind(tableAccuracy, confusionMatrix(predictions, testVal$classe)$overall[1])
+
+cartFit <- train(classe~., method="rpart", data=trainData_train5)
+testVal = trainData_test5
+predictions <- predict(cartFit, testVal)
+tableAccuracy <- rbind(tableAccuracy, confusionMatrix(predictions, testVal$classe)$overall[1])
+
+colnames(tableAccuracy) <- "Accuracy"
+tableAccuracy
+```
+
+### Training the data to RF model
+We then constructed the Random Forest (RF) model with `rf` method on 1 of 5 sets of the training data. A summary of the model fitted was summarised and a classification tree plot is shown below.
+
+```{r}
+rfFit1 <- train(classe~., method="rf", prox=T, data=trainData_train1)
+print(rfFit1, digit=3)
+```
+
+### Evaluation of RF model via the Accuracy criterion
+Again, we looked closely into the predictivity of the RF model on test values by doing the following: 
+
+```{r}
+predictions <- predict(rfFit1, trainData_test1)
+confusionMatrix(predictions, trainData_test1$classe)
+```
+
+There is a high accuracy (more than 80%) in the model. Similarly we build the model across all training datasets and test values. The accuracy values are tabulated. 
+
+```{r}
+tableAccuracy_RF <- data.frame(Accuracy=numeric())
+tableAccuracy_RF <- rbind(tableAccuracy_RF, confusionMatrix(predictions, trainData_test1$classe)$overall[1])
+
+rfFit <- train(classe~., method="rf", prox=T, data=trainData_train2)
+testVal = trainData_test2
+predictions <- predict(rfFit, testVal)
+tableAccuracy_RF <- rbind(tableAccuracy_RF, confusionMatrix(predictions, testVal$classe)$overall[1])
+
+rfFit <- train(classe~., method="rf", prox=T, data=trainData_train3)
+testVal = trainData_test3
+predictions <- predict(rfFit, testVal)
+tableAccuracy_RF <- rbind(tableAccuracy_RF, confusionMatrix(predictions, testVal$classe)$overall[1])
+
+rfFit <- train(classe~., method="rf", prox=T, data=trainData_train4)
+testVal = trainData_test4
+predictions <- predict(rfFit, testVal)
+tableAccuracy_RF <- rbind(tableAccuracy_RF, confusionMatrix(predictions, testVal$classe)$overall[1])
+
+rfFit <- train(classe~., method="rf", prox=T, data=trainData_train5)
+testVal = trainData_test5
+predictions <- predict(rfFit, testVal)
+tableAccuracy_RF <- rbind(tableAccuracy_RF, confusionMatrix(predictions, testVal$classe)$overall[1])
+
+colnames(tableAccuracy_RF) <- "Accuracy_RF"
+```
+
+### Evaluation of RF model with preprocessing and cross-validation 
+We now build the RF models with preprocessing by normalising through `center` and `scale` methods, and with cross-validation through `cv` method. Again the accuracy values are tabulated. 
+
+```{r}
+tableAccuracy_RFcvnorm <- data.frame(Accuracy=numeric())
+
+testVal = trainData_test1
+trainVal = trainData_train1
+rfFit1 <- train(classe~., method="rf", prox=T, 
+               trControl=trainControl(method = "cv", number = 4),
+               preProcess=c("center", "scale"),
+               data=trainVal)
+predictions <- predict(rfFit, testval)
+tableAccuracy_RFcvnorm <- rbind(tableAccuracy_RFcvnorm, 
+                                confusionMatrix(predictions, testVal$classe)$overall[1])
+
+testVal = trainData_test2
+trainVal = trainData_train2
+rfFit2 <- train(classe~., method="rf", prox=T, 
+               trControl=trainControl(method = "cv", number = 4),
+               preProcess=c("center", "scale"),
+               data=trainVal)
+predictions <- predict(rfFit, testval)
+tableAccuracy_RFcvnorm <- rbind(tableAccuracy_RFcvnorm, 
+                                confusionMatrix(predictions, testVal$classe)$overall[1])
+
+testVal = trainData_test3
+trainVal = trainData_train3
+rfFit3 <- train(classe~., method="rf", prox=T, 
+               trControl=trainControl(method = "cv", number = 4),
+               preProcess=c("center", "scale"),
+               data=trainVal)
+predictions <- predict(rfFit, testval)
+tableAccuracy_RFcvnorm <- rbind(tableAccuracy_RFcvnorm, 
+                                confusionMatrix(predictions, testVal$classe)$overall[1])
+
+testVal = trainData_test4
+trainVal = trainData_train4
+rfFit4 <- train(classe~., method="rf", prox=T, 
+               trControl=trainControl(method = "cv", number = 4),
+               preProcess=c("center", "scale"),
+               data=trainVal)
+predictions <- predict(rfFit, testval)
+tableAccuracy_RFcvnorm <- rbind(tableAccuracy_RFcvnorm, 
+                                confusionMatrix(predictions, testVal$classe)$overall[1])
+
+testVal = trainData_test5
+trainVal = trainData_train5
+rfFit5 <- train(classe~., method="rf", prox=T, 
+               trControl=trainControl(method = "cv", number = 4),
+               preProcess=c("center", "scale"),
+               data=trainVal)
+predictions <- predict(rfFit, testval)
+tableAccuracy_RFcvnorm <- rbind(tableAccuracy_RFcvnorm, 
+                                confusionMatrix(predictions, testVal$classe)$overall[1])
+
+
+colnames(tableAccuracy_RFcvnorm) <- "Accuracy_RFcvnorm"
+```
+
+## Analysing the Accuracy values
+
+```{r}
+tableAccuracyAll <- cbind(tableAccuracy,tableAccuracy_RF, tableAccuracy_RFcvnorm)
+
+tableAccuracyAll[,4] <- 1 - tableAccuracyAll[,3]
+
+colnames(tableAccuracyAll) <- c("Accuracy_CART",
+                                "Accuracy_RF",
+                                "Accuracy_RFcvnorm", 
+                                "Error Rate")
+```
+
+## Conclusion
